@@ -1,0 +1,52 @@
+name: Register Signal
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_path:
+        description: 'Path to artifact in source repo'
+        required: true
+        type: string
+      source_repo:
+        description: 'Source repository'
+        required: true
+        type: string
+  repository_dispatch:
+    types: [register-signal]
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests numpy pyyaml
+
+      - name: Fetch artifact metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_PATH: ${{ github.event.inputs.artifact_path || github.event.client_payload.artifact_path }}
+          SOURCE_REPO: ${{ github.event.inputs.source_repo || github.event.client_payload.source_repo }}
+        run: |
+          echo "Fetching: ${SOURCE_REPO}/${ARTIFACT_PATH}"
+          gh api "/repos/${SOURCE_REPO}/contents/${ARTIFACT_PATH}" --jq '.content' | base64 -d > artifact.md
+
+      - name: Extract and register signal
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/register.py --input artifact.md
+
+      - name: Commit updated index
+        run: |
+          git config user.name "LEGATO Bot"
+          git config user.email "legato@users.noreply.github.com"
+          git add index.json signals/
+          git diff --staged --quiet || git commit -m "Register signal: ${{ github.event.inputs.artifact_path }}"
+          git push
